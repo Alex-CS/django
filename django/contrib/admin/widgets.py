@@ -11,7 +11,7 @@ from django.urls import reverse
 from django.urls.exceptions import NoReverseMatch
 from django.utils import six
 from django.utils.encoding import force_text
-from django.utils.html import escape, escapejs, format_html, smart_urlquote
+from django.utils.html import escapejs, smart_urlquote
 from django.utils.safestring import mark_safe
 from django.utils.text import Truncator
 from django.utils.translation import ugettext as _
@@ -164,7 +164,7 @@ class ForeignKeyRawIdWidget(forms.TextInput):
             )
 
         if context['widget']['value']:
-            context['link_label'] = self.label_for_value(value)
+            context['link_label'], context['link_url'] = self.label_and_url_for_value(value)
 
         return context
 
@@ -180,18 +180,15 @@ class ForeignKeyRawIdWidget(forms.TextInput):
         params.update({TO_FIELD_VAR: self.rel.get_related_field().name})
         return params
 
-    def label_for_value(self, value):
+    def label_and_url_for_value(self, value):
         key = self.rel.get_related_field().name
         try:
             obj = self.rel.model._default_manager.using(self.db).get(**{key: value})
-            return escape(Truncator(obj).words(14, truncate='...'))
         except (ValueError, self.rel.model.DoesNotExist):
-            return ''
+            return '', ''
 
-        label = '&nbsp;<strong>{}</strong>'
-        text = Truncator(obj).words(14, truncate='...')
         try:
-            change_url = reverse(
+            url = reverse(
                 '%s:%s_%s_change' % (
                     self.admin_site.name,
                     obj._meta.app_label,
@@ -200,11 +197,9 @@ class ForeignKeyRawIdWidget(forms.TextInput):
                 args=(obj.pk,)
             )
         except NoReverseMatch:
-            pass  # Admin not registered for target model.
-        else:
-            text = format_html('<a href="{}">{}</a>', change_url, text)
+            url = ''  # Admin not registered for target model.
 
-        return format_html(label, text)
+        return Truncator(obj).words(14, truncate='...'), url
 
 
 class ManyToManyRawIdWidget(ForeignKeyRawIdWidget):
@@ -224,8 +219,8 @@ class ManyToManyRawIdWidget(ForeignKeyRawIdWidget):
     def url_parameters(self):
         return self.base_url_parameters()
 
-    def label_for_value(self, value):
-        return ''
+    def label_and_url_for_value(self, value):
+        return '', ''
 
     def value_from_datadict(self, data, files, name):
         value = data.get(name)
