@@ -1,4 +1,3 @@
-import logging
 import re
 
 from django import http
@@ -7,14 +6,13 @@ from django.core.exceptions import PermissionDenied
 from django.core.mail import mail_managers
 from django.urls import is_valid_path
 from django.utils.cache import get_conditional_response, set_response_etag
+from django.utils.deprecation import MiddlewareMixin
 from django.utils.encoding import force_text
 from django.utils.http import unquote_etag
 from django.utils.six.moves.urllib.parse import urlparse
 
-logger = logging.getLogger('django.request')
 
-
-class CommonMiddleware(object):
+class CommonMiddleware(MiddlewareMixin):
     """
     "Common" middleware for taking care of some basic operations:
 
@@ -125,11 +123,15 @@ class CommonMiddleware(object):
                     etag=unquote_etag(response['ETag']),
                     response=response,
                 )
+        # Add the Content-Length header to non-streaming responses if not
+        # already set.
+        if not response.streaming and not response.has_header('Content-Length'):
+            response['Content-Length'] = str(len(response.content))
 
         return response
 
 
-class BrokenLinkEmailsMiddleware(object):
+class BrokenLinkEmailsMiddleware(MiddlewareMixin):
 
     def process_response(self, request, response):
         """

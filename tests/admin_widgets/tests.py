@@ -116,7 +116,7 @@ class AdminFormfieldForDBFieldTests(SimpleTestCase):
     def test_radio_fields_ForeignKey(self):
         ff = self.assertFormfield(models.Event, 'main_band', widgets.AdminRadioSelect,
                                   radio_fields={'main_band': admin.VERTICAL})
-        self.assertEqual(ff.empty_label, None)
+        self.assertIsNone(ff.empty_label)
 
     def test_many_to_many(self):
         self.assertFormfield(models.Band, 'members', forms.SelectMultiple)
@@ -881,6 +881,8 @@ class HorizontalVerticalFilterSeleniumTests(AdminWidgetSeleniumTestCase):
             self.assertEqual(self.has_css_class(remove_all_link, 'active'), remove_all)
 
     def execute_basic_operations(self, mode, field_name):
+        original_url = self.selenium.current_url
+
         from_box = '#id_%s_from' % field_name
         to_box = '#id_%s_to' % field_name
         choose_link = 'id_%s_add_link' % field_name
@@ -1013,6 +1015,9 @@ class HorizontalVerticalFilterSeleniumTests(AdminWidgetSeleniumTestCase):
         # Unselect the options ------------------------------------------------
         self.get_select_option(to_box, str(self.jason.id)).click()
         self.get_select_option(to_box, str(self.john.id)).click()
+
+        # Pressing buttons shouldn't change the URL.
+        self.assertEqual(self.selenium.current_url, original_url)
 
     def test_basic(self):
         self.school.students.set([self.lisa, self.peter])

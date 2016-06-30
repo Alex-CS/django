@@ -188,10 +188,7 @@ class ProxyModelTests(TestCase):
 
     def test_permissions_created(self):
         from django.contrib.auth.models import Permission
-        try:
-            Permission.objects.get(name="May display users information")
-        except Permission.DoesNotExist:
-            self.fail("The permission 'May display users information' has not been created")
+        Permission.objects.get(name="May display users information")
 
     def test_proxy_model_signals(self):
         """
@@ -384,7 +381,7 @@ class ProxyModelAdminTests(TestCase):
         tracker_user = TrackerUser.objects.all()[0]
         base_user = BaseUser.objects.all()[0]
         issue = Issue.objects.all()[0]
-        with self.assertNumQueries(7):
+        with self.assertNumQueries(6):
             collector = admin.utils.NestedObjects('default')
             collector.collect(ProxyTrackerUser.objects.all())
         self.assertIn(tracker_user, collector.edges.get(None, ()))

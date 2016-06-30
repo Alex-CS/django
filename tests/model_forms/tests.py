@@ -14,8 +14,8 @@ from django.core.validators import ValidationError
 from django.db import connection, models
 from django.db.models.query import EmptyQuerySet
 from django.forms.models import (
-    ModelFormMetaclass, construct_instance, fields_for_model, model_to_dict,
-    modelform_factory,
+    ModelChoiceIterator, ModelFormMetaclass, construct_instance,
+    fields_for_model, model_to_dict, modelform_factory,
 )
 from django.template import Context, Template
 from django.test import SimpleTestCase, TestCase, skipUnlessDBFeature
@@ -28,9 +28,10 @@ from .models import (
     CustomErrorMessage, CustomFF, CustomFieldForExclusionModel, DateTimePost,
     DerivedBook, DerivedPost, Document, ExplicitPK, FilePathModel,
     FlexibleDatePost, Homepage, ImprovedArticle, ImprovedArticleWithParentLink,
-    Inventory, Person, Photo, Post, Price, Product, Publication,
-    PublicationDefaults, StrictAssignmentAll, StrictAssignmentFieldSpecific,
-    Student, StumpJoke, TextFile, Triple, Writer, WriterProfile, test_images,
+    Inventory, NullableUniqueCharFieldModel, Person, Photo, Post, Price,
+    Product, Publication, PublicationDefaults, StrictAssignmentAll,
+    StrictAssignmentFieldSpecific, Student, StumpJoke, TextFile, Triple,
+    Writer, WriterProfile, test_images,
 )
 
 if test_images:
@@ -270,6 +271,21 @@ class ModelFormBaseTest(TestCase):
         obj = form.save()
         self.assertEqual(obj.name, '')
 
+    def test_save_blank_null_unique_charfield_saves_null(self):
+        form_class = modelform_factory(model=NullableUniqueCharFieldModel, fields=['codename'])
+        empty_value = '' if connection.features.interprets_empty_strings_as_nulls else None
+
+        form = form_class(data={'codename': ''})
+        self.assertTrue(form.is_valid())
+        form.save()
+        self.assertEqual(form.instance.codename, empty_value)
+
+        # Save a second form to verify there isn't a unique constraint violation.
+        form = form_class(data={'codename': ''})
+        self.assertTrue(form.is_valid())
+        form.save()
+        self.assertEqual(form.instance.codename, empty_value)
+
     def test_missing_fields_attribute(self):
         message = (
             "Creating a ModelForm without either the 'fields' attribute "
@@ -289,7 +305,7 @@ class ModelFormBaseTest(TestCase):
                          ['name', 'slug', 'url', 'some_extra_field'])
 
     def test_extra_field_model_form(self):
-        try:
+        with self.assertRaisesMessage(FieldError, 'no-field'):
             class ExtraPersonForm(forms.ModelForm):
                 """ ModelForm with an extra field """
                 age = forms.IntegerField()
@@ -297,24 +313,15 @@ class ModelFormBaseTest(TestCase):
                 class Meta:
                     model = Person
                     fields = ('name', 'no-field')
-        except FieldError as e:
-            # Make sure the exception contains some reference to the
-            # field responsible for the problem.
-            self.assertIn('no-field', e.args[0])
-        else:
-            self.fail('Invalid "no-field" field not caught')
 
     def test_extra_declared_field_model_form(self):
-        try:
-            class ExtraPersonForm(forms.ModelForm):
-                """ ModelForm with an extra field """
-                age = forms.IntegerField()
+        class ExtraPersonForm(forms.ModelForm):
+            """ ModelForm with an extra field """
+            age = forms.IntegerField()
 
-                class Meta:
-                    model = Person
-                    fields = ('name', 'age')
-        except FieldError:
-            self.fail('Declarative field raised FieldError incorrectly')
+            class Meta:
+                model = Person
+                fields = ('name', 'age')
 
     def test_extra_field_modelform_factory(self):
         with self.assertRaises(FieldError):
@@ -800,10 +807,14 @@ class UniqueTest(TestCase):
         form.save()
         form = ExplicitPKForm({'key': 'key1', 'desc': ''})
         self.assertFalse(form.is_valid())
-        self.assertEqual(len(form.errors), 3)
-        self.assertEqual(form.errors['__all__'], ['Explicit pk with this Key and Desc already exists.'])
-        self.assertEqual(form.errors['desc'], ['Explicit pk with this Desc already exists.'])
-        self.assertEqual(form.errors['key'], ['Explicit pk with this Key already exists.'])
+        if connection.features.interprets_empty_strings_as_nulls:
+            self.assertEqual(len(form.errors), 1)
+            self.assertEqual(form.errors['key'], ['Explicit pk with this Key already exists.'])
+        else:
+            self.assertEqual(len(form.errors), 3)
+            self.assertEqual(form.errors['__all__'], ['Explicit pk with this Key and Desc already exists.'])
+            self.assertEqual(form.errors['desc'], ['Explicit pk with this Desc already exists.'])
+            self.assertEqual(form.errors['key'], ['Explicit pk with this Key already exists.'])
 
     def test_unique_for_date(self):
         p = Post.objects.create(
@@ -1573,6 +1584,30 @@ class ModelChoiceFieldTests(TestCase):
         with self.assertNumQueries(1):
             template.render(Context({'field': field}))
 
+    def test_modelchoicefield_index_renderer(self):
+        field = forms.ModelChoiceField(Category.objects.all(), widget=forms.RadioSelect)
+        self.assertEqual(
+            str(field.widget.get_renderer('foo', [])[0]),
+            '<label><input name="foo" type="radio" value="" /> ---------</label>'
+        )
+
+    def test_modelchoicefield_iterator(self):
+        """
+        Iterator defaults to ModelChoiceIterator and can be overridden with
+        the iterator attribute on a ModelChoiceField subclass.
+        """
+        field = forms.ModelChoiceField(Category.objects.all())
+        self.assertIsInstance(field.choices, ModelChoiceIterator)
+
+        class CustomModelChoiceIterator(ModelChoiceIterator):
+            pass
+
+        class CustomModelChoiceField(forms.ModelChoiceField):
+            iterator = CustomModelChoiceIterator
+
+        field = CustomModelChoiceField(Category.objects.all())
+        self.assertIsInstance(field.choices, CustomModelChoiceIterator)
+
 
 class ModelMultipleChoiceFieldTests(TestCase):
     def setUp(self):
@@ -1840,12 +1875,12 @@ class ModelOneToOneFieldTests(TestCase):
         author = Author.objects.create(publication=publication, full_name='John Doe')
         form = AuthorForm({'publication': '', 'full_name': 'John Doe'}, instance=author)
         self.assertTrue(form.is_valid())
-        self.assertEqual(form.cleaned_data['publication'], None)
+        self.assertIsNone(form.cleaned_data['publication'])
         author = form.save()
         # author object returned from form still retains original publication object
         # that's why we need to retrieve it from database again
         new_author = Author.objects.get(pk=author.pk)
-        self.assertEqual(new_author.publication, None)
+        self.assertIsNone(new_author.publication)
 
     def test_assignment_of_none_null_false(self):
         class AuthorForm(forms.ModelForm):
@@ -1867,8 +1902,8 @@ class FileAndImageFieldTests(TestCase):
         of the value of ``initial``.
         """
         f = forms.FileField(required=False)
-        self.assertEqual(f.clean(False), False)
-        self.assertEqual(f.clean(False, 'initial'), False)
+        self.assertIs(f.clean(False), False)
+        self.assertIs(f.clean(False, 'initial'), False)
 
     def test_clean_false_required(self):
         """
@@ -1902,7 +1937,7 @@ class FileAndImageFieldTests(TestCase):
         self.assertIn('myfile-clear', six.text_type(form))
         form = DocumentForm(instance=doc, data={'myfile-clear': 'true'})
         doc = form.save(commit=False)
-        self.assertEqual(bool(doc.myfile), False)
+        self.assertFalse(doc.myfile)
 
     def test_clear_and_file_contradiction(self):
         """
@@ -2175,8 +2210,8 @@ class FileAndImageFieldTests(TestCase):
         self.assertTrue(f.is_valid())
         instance = f.save()
         self.assertEqual(instance.image.name, expected_null_imagefield_repr)
-        self.assertEqual(instance.width, None)
-        self.assertEqual(instance.height, None)
+        self.assertIsNone(instance.width)
+        self.assertIsNone(instance.height)
 
         f = OptionalImageFileForm(
             data={'description': 'And a final one'},

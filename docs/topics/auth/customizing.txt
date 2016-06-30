@@ -595,13 +595,9 @@ password resets. You must then provide some key implementation details:
 
     .. admonition:: Importing ``AbstractBaseUser``
 
-        .. versionadded:: 1.9
-
         ``AbstractBaseUser`` and ``BaseUserManager`` are importable from
         ``django.contrib.auth.base_user`` so that they can be imported without
-        including ``django.contrib.auth`` in :setting:`INSTALLED_APPS` (this
-        raised a deprecation warning in older versions and is no longer
-        supported in Django 1.9).
+        including ``django.contrib.auth`` in :setting:`INSTALLED_APPS`.
 
 The following attributes and methods are available on any subclass of
 :class:`~django.contrib.auth.models.AbstractBaseUser`:
@@ -611,6 +607,22 @@ The following attributes and methods are available on any subclass of
     .. method:: get_username()
 
         Returns the value of the field nominated by ``USERNAME_FIELD``.
+
+    .. method:: clean()
+
+        .. versionadded:: 1.10
+
+        Normalizes the username by calling :meth:`normalize_username`. If you
+        override this method, be sure to call ``super()`` to retain the
+        normalization.
+
+    .. classmethod:: normalize_username(username)
+
+        .. versionadded:: 1.10
+
+        Applies NFKC Unicode normalization to usernames so that visually
+        identical characters with different Unicode code points are considered
+        identical.
 
     .. attribute:: models.AbstractBaseUser.is_authenticated
 
@@ -680,6 +692,18 @@ The following attributes and methods are available on any subclass of
         Returns an HMAC of the password field. Used for
         :ref:`session-invalidation-on-password-change`.
 
+:class:`~models.AbstractUser` subclasses :class:`~models.AbstractBaseUser`:
+
+.. class:: models.AbstractUser
+
+    .. method:: clean()
+
+        .. versionadded:: 1.11
+
+        Normalizes the email by calling
+        :meth:`.BaseUserManager.normalize_email`. If you override this method,
+        be sure to call ``super()`` to retain the normalization.
+
 You should also define a custom manager for your ``User`` model. If your
 ``User`` model defines ``username``, ``email``, ``is_staff``, ``is_active``,
 ``is_superuser``, ``last_login``, and ``date_joined`` fields the same as
@@ -721,10 +745,10 @@ utility methods:
 
 .. class:: models.BaseUserManager
 
-    .. method:: models.BaseUserManager.normalize_email(email)
+    .. classmethod:: models.BaseUserManager.normalize_email(email)
 
-        A ``classmethod`` that normalizes email addresses by lowercasing
-        the domain portion of the email address.
+        Normalizes email addresses by lowercasing the domain portion of the
+        email address.
 
     .. method:: models.BaseUserManager.get_by_natural_key(username)
 
@@ -747,7 +771,7 @@ Extending Django's default ``User``
 
 If you're entirely happy with Django's :class:`~django.contrib.auth.models.User`
 model and you just want to add some additional profile information, you could
-simply subclass ``django.contrib.auth.models.AbstractUser`` and add your
+simply subclass :class:`django.contrib.auth.models.AbstractUser` and add your
 custom profile fields, although we'd recommend a separate model as described in
 the "Model design considerations" note of :ref:`specifying-custom-user-model`.
 ``AbstractUser`` provides the full implementation of the default
@@ -963,9 +987,10 @@ authentication app::
             Creates and saves a superuser with the given email, date of
             birth and password.
             """
-            user = self.create_user(email,
+            user = self.create_user(
+                email,
                 password=password,
-                date_of_birth=date_of_birth
+                date_of_birth=date_of_birth,
             )
             user.is_admin = True
             user.save(using=self._db)

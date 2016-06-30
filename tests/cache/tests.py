@@ -5,6 +5,7 @@
 from __future__ import unicode_literals
 
 import copy
+import io
 import os
 import re
 import shutil
@@ -522,7 +523,7 @@ class BaseCacheTests(object):
         cache.add('key2', 'ham', None)
         self.assertEqual(cache.get('key2'), 'ham')
         added = cache.add('key1', 'new eggs', None)
-        self.assertEqual(added, False)
+        self.assertIs(added, False)
         self.assertEqual(cache.get('key1'), 'eggs')
 
         cache.set_many({'key3': 'sausage', 'key4': 'lobster bisque'}, None)
@@ -1261,6 +1262,17 @@ class FileBasedCacheTests(BaseCacheTests, TestCase):
         # This fails if not using the highest pickling protocol on Python 2.
         cache.set('unpicklable', UnpicklableType())
 
+    def test_get_ignores_enoent(self):
+        cache.set('foo', 'bar')
+        os.unlink(cache._key_to_file('foo'))
+        # Returns the default instead of erroring.
+        self.assertEqual(cache.get('foo', 'baz'), 'baz')
+
+    def test_get_does_not_ignore_non_enoent_errno_values(self):
+        with mock.patch.object(io, 'open', side_effect=IOError):
+            with self.assertRaises(IOError):
+                cache.get('foo')
+
 
 @override_settings(CACHES={
     'default': {
@@ -1381,6 +1393,7 @@ class DefaultNonExpiringCacheKeyTests(SimpleTestCase):
         },
     },
     USE_I18N=False,
+    ALLOWED_HOSTS=['.example.com'],
 )
 class CacheUtils(SimpleTestCase):
     """TestCase for django.utils.cache functions."""

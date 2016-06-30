@@ -22,6 +22,7 @@ from django.core.mail import (
 from django.core.mail.backends import console, dummy, filebased, locmem, smtp
 from django.core.mail.message import BadHeaderError, sanitize_address
 from django.test import SimpleTestCase, override_settings
+from django.test.utils import requires_tz_support
 from django.utils._os import upath
 from django.utils.encoding import force_bytes, force_text
 from django.utils.six import PY3, StringIO, binary_type
@@ -603,6 +604,26 @@ class MailTests(HeadersCheckMixin, SimpleTestCase):
             sanitize_address(('Tó Example', 'tó@example.com'), 'utf-8'),
             '=?utf-8?q?T=C3=B3_Example?= <=?utf-8?b?dMOz?=@example.com>'
         )
+
+
+@requires_tz_support
+class MailTimeZoneTests(SimpleTestCase):
+
+    @override_settings(EMAIL_USE_LOCALTIME=False, USE_TZ=True, TIME_ZONE='Africa/Algiers')
+    def test_date_header_utc(self):
+        """
+        EMAIL_USE_LOCALTIME=False creates a datetime in UTC.
+        """
+        email = EmailMessage('Subject', 'Body', 'bounce@example.com', ['to@example.com'])
+        self.assertTrue(email.message()['Date'].endswith('-0000'))
+
+    @override_settings(EMAIL_USE_LOCALTIME=True, USE_TZ=True, TIME_ZONE='Africa/Algiers')
+    def test_date_header_localtime(self):
+        """
+        EMAIL_USE_LOCALTIME=True creates a datetime in the local time zone.
+        """
+        email = EmailMessage('Subject', 'Body', 'bounce@example.com', ['to@example.com'])
+        self.assertTrue(email.message()['Date'].endswith('+0100'))  # Africa/Algiers is UTC+1
 
 
 class PythonGlobalState(SimpleTestCase):
@@ -1228,7 +1249,7 @@ class SMTPBackendTests(BaseEmailBackendTests, SMTPBackendTestsBase):
 
     def test_email_ssl_certfile_default_disabled(self):
         backend = smtp.EmailBackend()
-        self.assertEqual(backend.ssl_certfile, None)
+        self.assertIsNone(backend.ssl_certfile)
 
     @override_settings(EMAIL_SSL_KEYFILE='foo')
     def test_email_ssl_keyfile_use_settings(self):
@@ -1242,7 +1263,7 @@ class SMTPBackendTests(BaseEmailBackendTests, SMTPBackendTestsBase):
 
     def test_email_ssl_keyfile_default_disabled(self):
         backend = smtp.EmailBackend()
-        self.assertEqual(backend.ssl_keyfile, None)
+        self.assertIsNone(backend.ssl_keyfile)
 
     @override_settings(EMAIL_USE_TLS=True)
     def test_email_tls_attempts_starttls(self):
@@ -1267,7 +1288,7 @@ class SMTPBackendTests(BaseEmailBackendTests, SMTPBackendTestsBase):
     def test_connection_timeout_default(self):
         """Test that the connection's timeout value is None by default."""
         connection = mail.get_connection('django.core.mail.backends.smtp.EmailBackend')
-        self.assertEqual(connection.timeout, None)
+        self.assertIsNone(connection.timeout)
 
     def test_connection_timeout_custom(self):
         """Test that the timeout parameter can be customized."""

@@ -67,6 +67,7 @@ LANGUAGES = [
     ('cy', gettext_noop('Welsh')),
     ('da', gettext_noop('Danish')),
     ('de', gettext_noop('German')),
+    ('dsb', gettext_noop('Lower Sorbian')),
     ('el', gettext_noop('Greek')),
     ('en', gettext_noop('English')),
     ('en-au', gettext_noop('Australian English')),
@@ -90,6 +91,7 @@ LANGUAGES = [
     ('he', gettext_noop('Hebrew')),
     ('hi', gettext_noop('Hindi')),
     ('hr', gettext_noop('Croatian')),
+    ('hsb', gettext_noop('Upper Sorbian')),
     ('hu', gettext_noop('Hungarian')),
     ('ia', gettext_noop('Interlingua')),
     ('id', gettext_noop('Indonesian')),
@@ -194,6 +196,9 @@ EMAIL_HOST = 'localhost'
 # Port for sending email.
 EMAIL_PORT = 25
 
+# Whether to send SMTP 'Date' header in the local time zone or in UTC.
+EMAIL_USE_LOCALTIME = False
+
 # Optional SMTP authentication information for EMAIL_HOST.
 EMAIL_HOST_USER = ''
 EMAIL_HOST_PASSWORD = ''
@@ -285,18 +290,26 @@ FILE_UPLOAD_HANDLERS = [
 # file system instead of into memory.
 FILE_UPLOAD_MAX_MEMORY_SIZE = 2621440  # i.e. 2.5 MB
 
+# Maximum size in bytes of request data (excluding file uploads) that will be
+# read before a SuspiciousOperation (RequestDataTooBig) is raised.
+DATA_UPLOAD_MAX_MEMORY_SIZE = 2621440  # i.e. 2.5 MB
+
+# Maximum number of GET/POST parameters that will be read before a
+# SuspiciousOperation (TooManyFieldsSent) is raised.
+DATA_UPLOAD_MAX_NUMBER_FIELDS = 1000
+
 # Directory in which upload streamed files will be temporarily saved. A value of
 # `None` will make Django use the operating system's default temporary directory
 # (i.e. "/tmp" on *nix systems).
 FILE_UPLOAD_TEMP_DIR = None
 
 # The numeric mode to set newly-uploaded files to. The value should be a mode
-# you'd pass directly to os.chmod; see http://docs.python.org/lib/os-file-dir.html.
+# you'd pass directly to os.chmod; see https://docs.python.org/3/library/os.html#files-and-directories.
 FILE_UPLOAD_PERMISSIONS = None
 
 # The numeric mode to assign to newly-created directories, when uploading files.
 # The value should be a mode as you'd pass to os.chmod;
-# see http://docs.python.org/lib/os-file-dir.html.
+# see https://docs.python.org/3/library/os.html#files-and-directories.
 FILE_UPLOAD_DIRECTORY_PERMISSIONS = None
 
 # Python module path where user will place custom format definition.
@@ -425,13 +438,15 @@ SECURE_PROXY_SSL_HEADER = None
 # MIDDLEWARE #
 ##############
 
-# List of middleware classes to use.  Order is important; in the request phase,
-# this middleware classes will be applied in the order given, and in the
-# response phase the middleware will be applied in reverse order.
+# List of middleware to use. Order is important; in the request phase, these
+# middleware will be applied in the order given, and in the response
+# phase the middleware will be applied in reverse order.
 MIDDLEWARE_CLASSES = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
 ]
+
+MIDDLEWARE = None
 
 ############
 # SESSIONS #

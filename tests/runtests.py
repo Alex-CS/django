@@ -62,7 +62,7 @@ ALWAYS_INSTALLED_APPS = [
     'django.contrib.staticfiles',
 ]
 
-ALWAYS_MIDDLEWARE_CLASSES = [
+ALWAYS_MIDDLEWARE = [
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -124,7 +124,7 @@ def setup(verbosity, test_labels, parallel):
         'LANGUAGE_CODE': settings.LANGUAGE_CODE,
         'STATIC_URL': settings.STATIC_URL,
         'STATIC_ROOT': settings.STATIC_ROOT,
-        'MIDDLEWARE_CLASSES': settings.MIDDLEWARE_CLASSES,
+        'MIDDLEWARE': settings.MIDDLEWARE,
     }
 
     # Redirect some settings for the duration of these tests.
@@ -147,7 +147,7 @@ def setup(verbosity, test_labels, parallel):
     }]
     settings.LANGUAGE_CODE = 'en'
     settings.SITE_ID = 1
-    settings.MIDDLEWARE_CLASSES = ALWAYS_MIDDLEWARE_CLASSES
+    settings.MIDDLEWARE = ALWAYS_MIDDLEWARE
     settings.MIGRATION_MODULES = {
         # This lets us skip creating migrations for the test models as many of
         # them depend on one of the following contrib applications.
@@ -418,12 +418,6 @@ if __name__ == "__main__":
              'test side effects not apparent with normal execution lineup.',
     )
     parser.add_argument(
-        '--liveserver',
-        help='Overrides the default address where the live server (used with '
-             'LiveServerTestCase) is expected to run from. The default value '
-             'is localhost:8081-8179.',
-    )
-    parser.add_argument(
         '--selenium', dest='selenium', action=ActionSelenium, metavar='BROWSERS',
         help='A comma-separated list of browsers to run the Selenium tests against.',
     )
@@ -466,9 +460,6 @@ if __name__ == "__main__":
         if "DJANGO_SETTINGS_MODULE" not in os.environ:
             os.environ['DJANGO_SETTINGS_MODULE'] = 'test_sqlite'
         options.settings = os.environ['DJANGO_SETTINGS_MODULE']
-
-    if options.liveserver is not None:
-        os.environ['DJANGO_LIVE_TEST_SERVER_ADDRESS'] = options.liveserver
 
     if options.selenium:
         if not options.tags:

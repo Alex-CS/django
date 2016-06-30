@@ -13,11 +13,12 @@ from django.db import (
     DJANGO_VERSION_PICKLE_KEY, IntegrityError, connections, router,
     transaction,
 )
-from django.db.models import sql
+from django.db.models import DateField, DateTimeField, sql
 from django.db.models.constants import LOOKUP_SEP
 from django.db.models.deletion import Collector
-from django.db.models.expressions import Date, DateTime, F
+from django.db.models.expressions import F
 from django.db.models.fields import AutoField
+from django.db.models.functions import Trunc
 from django.db.models.query_utils import (
     InvalidQuery, Q, check_rel_lookup_compatibility,
 )
@@ -499,6 +500,7 @@ class QuerySet(object):
         """
         try:
             with transaction.atomic(using=self.db):
+                params = {k: v() if callable(v) else v for k, v in params.items()}
                 obj = self.create(**params)
             return obj, True
         except IntegrityError:
@@ -630,6 +632,8 @@ class QuerySet(object):
         self._for_write = True
         query = self.query.clone(sql.UpdateQuery)
         query.add_update_values(kwargs)
+        # Clear any annotations so that they won't be present in subqueries.
+        query._annotations = None
         with transaction.atomic(using=self.db, savepoint=False):
             rows = query.get_compiler(self.db).execute_sql(CURSOR)
         self._result_cache = None
@@ -739,7 +743,7 @@ class QuerySet(object):
         assert order in ('ASC', 'DESC'), \
             "'order' must be either 'ASC' or 'DESC'."
         return self.annotate(
-            datefield=Date(field_name, kind),
+            datefield=Trunc(field_name, kind, output_field=DateField()),
             plain_field=F(field_name)
         ).values_list(
             'datefield', flat=True
@@ -760,7 +764,7 @@ class QuerySet(object):
         else:
             tzinfo = None
         return self.annotate(
-            datetimefield=DateTime(field_name, kind, tzinfo),
+            datetimefield=Trunc(field_name, kind, output_field=DateTimeField(), tzinfo=tzinfo),
             plain_field=F(field_name)
         ).values_list(
             'datetimefield', flat=True
@@ -1056,15 +1060,13 @@ class QuerySet(object):
         inserted_ids = []
         for item in [objs[i:i + batch_size] for i in range(0, len(objs), batch_size)]:
             if connections[self.db].features.can_return_ids_from_bulk_insert:
-                inserted_id = self.model._base_manager._insert(
-                    item, fields=fields, using=self.db, return_id=True
-                )
+                inserted_id = self._insert(item, fields=fields, using=self.db, return_id=True)
                 if len(objs) > 1:
                     inserted_ids.extend(inserted_id)
                 if len(objs) == 1:
                     inserted_ids.append(inserted_id)
             else:
-                self.model._base_manager._insert(item, fields=fields, using=self.db)
+                self._insert(item, fields=fields, using=self.db)
         return inserted_ids
 
     def _clone(self, **kwargs):
@@ -1452,7 +1454,8 @@ def prefetch_related_objects(model_instances, *related_lookups):
             # We assume that objects retrieved are homogeneous (which is the premise
             # of prefetch_related), so what applies to first object applies to all.
             first_obj = obj_list[0]
-            prefetcher, descriptor, attr_found, is_fetched = get_prefetcher(first_obj, through_attr)
+            to_attr = lookup.get_current_to_attr(level)[0]
+            prefetcher, descriptor, attr_found, is_fetched = get_prefetcher(first_obj, through_attr, to_attr)
 
             if not attr_found:
                 raise AttributeError("Cannot find '%s' on %s object, '%s' is an invalid "
@@ -1505,9 +1508,9 @@ def prefetch_related_objects(model_instances, *related_lookups):
                 obj_list = new_obj_list
 
 
-def get_prefetcher(instance, attr):
+def get_prefetcher(instance, through_attr, to_attr):
     """
-    For the attribute 'attr' on the given instance, finds
+    For the attribute 'through_attr' on the given instance, finds
     an object that has a get_prefetch_queryset().
     Returns a 4 tuple containing:
     (the object with get_prefetch_queryset (or None),
@@ -1521,9 +1524,9 @@ def get_prefetcher(instance, attr):
     # For singly related objects, we have to avoid getting the attribute
     # from the object, as this will trigger the query. So we first try
     # on the class, in order to get the descriptor object.
-    rel_obj_descriptor = getattr(instance.__class__, attr, None)
+    rel_obj_descriptor = getattr(instance.__class__, through_attr, None)
     if rel_obj_descriptor is None:
-        attr_found = hasattr(instance, attr)
+        attr_found = hasattr(instance, through_attr)
     else:
         attr_found = True
         if rel_obj_descriptor:
@@ -1537,10 +1540,13 @@ def get_prefetcher(instance, attr):
                 # descriptor doesn't support prefetching, so we go ahead and get
                 # the attribute on the instance rather than the class to
                 # support many related managers
-                rel_obj = getattr(instance, attr)
+                rel_obj = getattr(instance, through_attr)
                 if hasattr(rel_obj, 'get_prefetch_queryset'):
                     prefetcher = rel_obj
-                is_fetched = attr in instance._prefetched_objects_cache
+                if through_attr != to_attr:
+                    is_fetched = hasattr(instance, to_attr)
+                else:
+                    is_fetched = through_attr in instance._prefetched_objects_cache
     return prefetcher, rel_obj_descriptor, attr_found, is_fetched
 
 
@@ -1620,7 +1626,6 @@ def prefetch_one_level(instances, prefetcher, lookup, level):
         else:
             if as_attr:
                 setattr(obj, to_attr, vals)
-                obj._prefetched_objects_cache[cache_name] = vals
             else:
                 manager = getattr(obj, to_attr)
                 if leaf and lookup.queryset is not None:

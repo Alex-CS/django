@@ -3,7 +3,7 @@ import unittest
 
 from django.conf import settings
 from django.contrib.admindocs import utils
-from django.contrib.admindocs.views import get_return_data_type
+from django.contrib.admindocs.views import get_return_data_type, simplify_regex
 from django.contrib.auth.models import User
 from django.contrib.sites.models import Site
 from django.test import TestCase, modify_settings, override_settings
@@ -88,6 +88,12 @@ class AdminDocViewTests(TestDataMixin, AdminDocsTestCase):
         # View docstring
         self.assertContains(response, 'Base view for admindocs views.')
 
+    @override_settings(ROOT_URLCONF='admin_docs.namespace_urls')
+    def test_namespaced_view_detail(self):
+        url = reverse('django-admindocs-views-detail', args=['admin_docs.views.XViewClass'])
+        response = self.client.get(url)
+        self.assertContains(response, '<h1>admin_docs.views.XViewClass</h1>')
+
     def test_view_detail_illegal_import(self):
         """
         #23601 - Ensure the view exists in the URLconf.
@@ -122,6 +128,15 @@ class AdminDocViewTests(TestDataMixin, AdminDocsTestCase):
             self.assertContains(response, '<h1 id="site-name"><a href="/admin/">Django administration</a></h1>')
         finally:
             utils.docutils_is_available = True
+
+    def test_simplify_regex(self):
+        tests = (
+            ('^a', '/a'),
+            ('^(?P<a>\w+)/b/(?P<c>\w+)/$', '/<a>/b/<c>/'),
+            ('^(?P<a>\w+)/b/(?P<c>\w+)$', '/<a>/b/<c>'),
+        )
+        for pattern, output in tests:
+            self.assertEqual(simplify_regex(pattern), output)
 
 
 @override_settings(TEMPLATES=[{

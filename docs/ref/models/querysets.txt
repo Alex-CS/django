@@ -921,8 +921,10 @@ For example, suppose you have these models::
         toppings = models.ManyToManyField(Topping)
 
         def __str__(self):              # __unicode__ on Python 2
-            return "%s (%s)" % (self.name, ", ".join(topping.name
-                                                     for topping in self.toppings.all()))
+            return "%s (%s)" % (
+                self.name,
+                ", ".join(topping.name for topping in self.toppings.all()),
+            )
 
 and run::
 
@@ -981,7 +983,7 @@ You can also use the normal join syntax to do related fields of related
 fields. Suppose we have an additional model to the example above::
 
     class Restaurant(models.Model):
-        pizzas = models.ManyToMany(Pizza, related_name='restaurants')
+        pizzas = models.ManyToManyField(Pizza, related_name='restaurants')
         best_pizza = models.ForeignKey(Pizza, related_name='championed_by')
 
 The following are all legal:
@@ -1669,8 +1671,11 @@ This is meant as a shortcut to boilerplatish code. For example::
 This pattern gets quite unwieldy as the number of fields in a model goes up.
 The above example can be rewritten using ``get_or_create()`` like so::
 
-    obj, created = Person.objects.get_or_create(first_name='John', last_name='Lennon',
-                      defaults={'birthday': date(1940, 10, 9)})
+    obj, created = Person.objects.get_or_create(
+        first_name='John',
+        last_name='Lennon',
+        defaults={'birthday': date(1940, 10, 9)},
+    )
 
 Any keyword arguments passed to ``get_or_create()`` — *except* an optional one
 called ``defaults`` — will be used in a :meth:`get()` call. If an object is
@@ -1682,18 +1687,18 @@ tuple of the new object and ``True``. The new object will be created roughly
 according to this algorithm::
 
     params = {k: v for k, v in kwargs.items() if '__' not in k}
-    params.update(defaults)
+    params.update({k: v() if callable(v) else v for k, v in defaults.items()})
     obj = self.model(**params)
     obj.save()
 
 In English, that means start with any non-``'defaults'`` keyword argument that
 doesn't contain a double underscore (which would indicate a non-exact lookup).
 Then add the contents of ``defaults``, overriding any keys if necessary, and
-use the result as the keyword arguments to the model class. As hinted at
-above, this is a simplification of the algorithm that is used, but it contains
-all the pertinent details. The internal implementation has some more
-error-checking than this and handles some extra edge-conditions; if you're
-interested, read the code.
+use the result as the keyword arguments to the model class. If there are any
+callables in ``defaults``, evaluate them. As hinted at above, this is a
+simplification of the algorithm that is used, but it contains all the pertinent
+details. The internal implementation has some more error-checking than this and
+handles some extra edge-conditions; if you're interested, read the code.
 
 If you have a field named ``defaults`` and want to use it as an exact lookup in
 ``get_or_create()``, just use ``'defaults__exact'``, like so::
@@ -1759,6 +1764,10 @@ whenever a request to a page has a side effect on your data. For more, see
   chapter because it isn't related to that book, but it can't create it either
   because ``title`` field should be unique.
 
+.. versionchanged:: 1.11
+
+    Added support for callable values in ``defaults``.
+
 ``update_or_create()``
 ~~~~~~~~~~~~~~~~~~~~~~
 
@@ -1766,7 +1775,7 @@ whenever a request to a page has a side effect on your data. For more, see
 
 A convenience method for updating an object with the given ``kwargs``, creating
 a new one if necessary. The ``defaults`` is a dictionary of (field, value)
-pairs used to update the object.
+pairs used to update the object. The values in ``defaults`` can be callables.
 
 Returns a tuple of ``(object, created)``, where ``object`` is the created or
 updated object and ``created`` is a boolean specifying whether a new object was
@@ -1801,6 +1810,10 @@ As described above in :meth:`get_or_create`, this method is prone to a
 race-condition which can result in multiple rows being inserted simultaneously
 if uniqueness is not enforced at the database level.
 
+.. versionchanged:: 1.11
+
+    Added support for callable values in ``defaults``.
+
 ``bulk_create()``
 ~~~~~~~~~~~~~~~~~
 
@@ -1825,10 +1838,6 @@ This has a number of caveats though:
   does not retrieve and set the primary key attribute, as ``save()`` does,
   unless the database backend supports it (currently PostgreSQL).
 * It does not work with many-to-many relationships.
-
-.. versionchanged:: 1.9
-
-    Support for using ``bulk_create()`` with proxy models was added.
 
 .. versionchanged:: 1.10
 
@@ -1950,6 +1959,17 @@ given parameters.
 
 Note that ``earliest()`` and ``latest()`` exist purely for convenience and
 readability.
+
+.. admonition:: ``earliest()`` and ``latest()`` may return instances with null dates.
+
+    Since ordering is delegated to the database, results on fields that allow
+    null values may be ordered differently if you use different databases. For
+    example, PostgreSQL and MySQL sort null values as if they are higher than
+    non-null values, while SQLite does the opposite.
+
+    You may want to filter out null values::
+
+        Entry.objects.filter(pub_date__isnull=False).latest('pub_date')
 
 ``earliest()``
 ~~~~~~~~~~~~~~
@@ -2163,10 +2183,6 @@ For example, to delete all the entries in a particular blog::
     # Delete all the entries belonging to this Blog.
     >>> Entry.objects.filter(blog=b).delete()
     (4, {'weblog.Entry': 2, 'weblog.Entry_authors': 2})
-
-.. versionchanged:: 1.9
-
-    The return value describing the number of objects deleted was added.
 
 By default, Django's :class:`~django.db.models.ForeignKey` emulates the SQL
 constraint ``ON DELETE CASCADE`` — in other words, any objects with foreign
@@ -2543,8 +2559,6 @@ numbers and even characters.
 ``date``
 ~~~~~~~~
 
-.. versionadded:: 1.9
-
 For datetime fields, casts the value as date. Allows chaining additional field
 lookups. Takes a date value.
 
@@ -2582,10 +2596,6 @@ SQL equivalent::
 When :setting:`USE_TZ` is ``True``, datetime fields are converted to the
 current time zone before filtering.
 
-.. versionchanged:: 1.9
-
-    Allowed chaining additional field lookups.
-
 .. fieldlookup:: month
 
 ``month``
@@ -2609,10 +2619,6 @@ SQL equivalent::
 When :setting:`USE_TZ` is ``True``, datetime fields are converted to the
 current time zone before filtering. This requires :ref:`time zone definitions
 in the database <database-time-zone-definitions>`.
-
-.. versionchanged:: 1.9
-
-    Allowed chaining additional field lookups.
 
 .. fieldlookup:: day
 
@@ -2641,10 +2647,6 @@ When :setting:`USE_TZ` is ``True``, datetime fields are converted to the
 current time zone before filtering. This requires :ref:`time zone definitions
 in the database <database-time-zone-definitions>`.
 
-.. versionchanged:: 1.9
-
-    Allowed chaining additional field lookups.
-
 .. fieldlookup:: week_day
 
 ``week_day``
@@ -2672,10 +2674,6 @@ When :setting:`USE_TZ` is ``True``, datetime fields are converted to the
 current time zone before filtering. This requires :ref:`time zone definitions
 in the database <database-time-zone-definitions>`.
 
-.. versionchanged:: 1.9
-
-    Allowed chaining additional field lookups.
-
 .. fieldlookup:: hour
 
 ``hour``
@@ -2700,15 +2698,6 @@ SQL equivalent::
 
 For datetime fields, when :setting:`USE_TZ` is ``True``, values are converted
 to the current time zone before filtering.
-
-.. versionchanged:: 1.9
-
-    Added support for :class:`~django.db.models.TimeField` on SQLite (other
-    databases supported it as of 1.7).
-
-.. versionchanged:: 1.9
-
-    Allowed chaining additional field lookups.
 
 .. fieldlookup:: minute
 
@@ -2735,15 +2724,6 @@ SQL equivalent::
 For datetime fields, When :setting:`USE_TZ` is ``True``, values are converted
 to the current time zone before filtering.
 
-.. versionchanged:: 1.9
-
-    Added support for :class:`~django.db.models.TimeField` on SQLite (other
-    databases supported it as of 1.7).
-
-.. versionchanged:: 1.9
-
-    Allowed chaining additional field lookups.
-
 .. fieldlookup:: second
 
 ``second``
@@ -2768,15 +2748,6 @@ SQL equivalent::
 
 For datetime fields, when :setting:`USE_TZ` is ``True``, values are converted
 to the current time zone before filtering.
-
-.. versionchanged:: 1.9
-
-    Added support for :class:`~django.db.models.TimeField` on SQLite (other
-    databases supported it as of 1.7).
-
-.. versionchanged:: 1.9
-
-    Allowed chaining additional field lookups.
 
 .. fieldlookup:: isnull
 
@@ -2936,11 +2907,6 @@ by the aggregate.
     * Default alias: ``<field>__avg``
     * Return type: ``float`` (or the type of whatever ``output_field`` is
       specified)
-
-    .. versionchanged:: 1.9
-
-        The ``output_field`` parameter was added to allow aggregating over
-        non-numeric columns, such as ``DurationField``.
 
 ``Count``
 ~~~~~~~~~

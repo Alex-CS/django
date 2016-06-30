@@ -16,6 +16,7 @@ from django.db.models.fields import (
 from django.db.models.fields.related import (
     ForeignKey, ForeignObject, ManyToManyField, OneToOneField,
 )
+from django.db.models.indexes import Index
 from django.db.transaction import atomic
 from django.test import (
     TransactionTestCase, mock, skipIfDBFeature, skipUnlessDBFeature,
@@ -825,6 +826,15 @@ class SchemaTests(TransactionTestCase):
                     author_is_fk = True
         self.assertTrue(author_is_fk, "No FK constraint for author_id found")
 
+    def test_alter_db_table_case(self):
+        # Create the table
+        with connection.schema_editor() as editor:
+            editor.create_model(Author)
+        # Alter the case of the table
+        old_table_name = Author._meta.db_table
+        with connection.schema_editor() as editor:
+            editor.alter_db_table(Author, old_table_name, old_table_name.upper())
+
     def test_alter_implicit_id_to_explicit(self):
         """
         Should be able to convert an implicit "id" field to an explicit "id"
@@ -1434,6 +1444,26 @@ class SchemaTests(TransactionTestCase):
         columns = self.column_classes(Author)
         self.assertEqual(columns['name'][0], "CharField")
 
+    def test_add_remove_index(self):
+        """
+        Tests index addition and removal
+        """
+        # Create the table
+        with connection.schema_editor() as editor:
+            editor.create_model(Author)
+        # Ensure the table is there and has no index
+        self.assertNotIn('title', self.get_indexes(Author._meta.db_table))
+        # Add the index
+        index = Index(fields=['name'], name='author_title_idx')
+        index.model = Author
+        with connection.schema_editor() as editor:
+            editor.add_index(index)
+        self.assertIn('name', self.get_indexes(Author._meta.db_table))
+        # Drop the index
+        with connection.schema_editor() as editor:
+            editor.remove_index(index)
+        self.assertNotIn('name', self.get_indexes(Author._meta.db_table))
+
     def test_indexes(self):
         """
         Tests creation/altering of indexes
@@ -1700,7 +1730,7 @@ class SchemaTests(TransactionTestCase):
             editor.create_model(Author)
         # Create a row
         Author.objects.create(name='Anonymous1')
-        self.assertEqual(Author.objects.get().height, None)
+        self.assertIsNone(Author.objects.get().height)
         old_field = Author._meta.get_field('height')
         # The default from the new field is used in updating existing rows.
         new_field = IntegerField(blank=True, default=42)
@@ -1743,7 +1773,7 @@ class SchemaTests(TransactionTestCase):
             editor.alter_field(Author, old_field, new_field, strict=True)
         self.assertEqual(
             self.get_constraints_for_column(Author, 'name'),
-            ['schema_author_name_1fbc5617_like', 'schema_author_name_1fbc5617_uniq']
+            ['schema_author_b068931c', 'schema_author_name_1fbc5617_like']
         )
         # Remove db_index=True to drop both indexes.
         with connection.schema_editor() as editor:
@@ -1764,7 +1794,7 @@ class SchemaTests(TransactionTestCase):
             editor.alter_field(Note, old_field, new_field, strict=True)
         self.assertEqual(
             self.get_constraints_for_column(Note, 'info'),
-            ['schema_note_info_4b0ea695_like', 'schema_note_info_4b0ea695_uniq']
+            ['schema_note_caf9b6b9', 'schema_note_info_4b0ea695_like']
         )
         # Remove db_index=True to drop both indexes.
         with connection.schema_editor() as editor:
@@ -1790,15 +1820,14 @@ class SchemaTests(TransactionTestCase):
             self.get_constraints_for_column(BookWithoutAuthor, 'title'),
             ['schema_book_d5d3db17', 'schema_book_title_2dfb2dff_like', 'schema_book_title_2dfb2dff_uniq']
         )
-        # Alter to remove unique=True (should drop unique index) # XXX: bug!
-        old_field = BookWithoutAuthor._meta.get_field('title')
-        new_field = CharField(max_length=100, db_index=True)
-        new_field.set_attributes_from_name('title')
+        # Alter to remove unique=True (should drop unique index)
+        new_field2 = CharField(max_length=100, db_index=True)
+        new_field2.set_attributes_from_name('title')
         with connection.schema_editor() as editor:
-            editor.alter_field(BookWithoutAuthor, old_field, new_field, strict=True)
+            editor.alter_field(BookWithoutAuthor, new_field, new_field2, strict=True)
         self.assertEqual(
             self.get_constraints_for_column(BookWithoutAuthor, 'title'),
-            ['schema_book_d5d3db17', 'schema_book_title_2dfb2dff_like', 'schema_book_title_2dfb2dff_uniq']
+            ['schema_book_d5d3db17', 'schema_book_title_2dfb2dff_like']
         )
 
     @unittest.skipUnless(connection.vendor == 'postgresql', "PostgreSQL specific")
@@ -1821,15 +1850,37 @@ class SchemaTests(TransactionTestCase):
             ['schema_tag_slug_2c418ba3_like', 'schema_tag_slug_key']
         )
         # Alter to remove db_index=True
-        old_field = Tag._meta.get_field('slug')
-        new_field = SlugField(unique=True)
-        new_field.set_attributes_from_name('slug')
+        new_field2 = SlugField(unique=True)
+        new_field2.set_attributes_from_name('slug')
         with connection.schema_editor() as editor:
-            editor.alter_field(Tag, old_field, new_field, strict=True)
+            editor.alter_field(Tag, new_field, new_field2, strict=True)
         self.assertEqual(
             self.get_constraints_for_column(Tag, 'slug'),
             ['schema_tag_slug_2c418ba3_like', 'schema_tag_slug_key']
         )
+
+    def test_alter_field_add_index_to_integerfield(self):
+        # Create the table and verify no initial indexes.
+        with connection.schema_editor() as editor:
+            editor.create_model(Author)
+        self.assertEqual(self.get_constraints_for_column(Author, 'weight'), [])
+
+        # Alter to add db_index=True and create index.
+        old_field = Author._meta.get_field('weight')
+        new_field = IntegerField(null=True, db_index=True)
+        new_field.set_attributes_from_name('weight')
+        with connection.schema_editor() as editor:
+            editor.alter_field(Author, old_field, new_field, strict=True)
+
+        expected = 'schema_author_7edabf99'
+        if connection.features.uppercases_column_names:
+            expected = expected.upper()
+        self.assertEqual(self.get_constraints_for_column(Author, 'weight'), [expected])
+
+        # Remove db_index=True to drop index.
+        with connection.schema_editor() as editor:
+            editor.alter_field(Author, new_field, old_field, strict=True)
+        self.assertEqual(self.get_constraints_for_column(Author, 'weight'), [])
 
     def test_alter_pk_with_self_referential_field(self):
         """

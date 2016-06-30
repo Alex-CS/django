@@ -104,20 +104,22 @@ class CreateModel(ModelOperation):
         return "Create %smodel %s" % ("proxy " if self.options.get("proxy", False) else "", self.name)
 
     def references_model(self, name, app_label=None):
-        strings_to_check = [self.name]
+        name_lower = name.lower()
+        if name_lower == self.name_lower:
+            return True
+
         # Check we didn't inherit from the model
-        for base in self.bases:
-            if isinstance(base, six.string_types):
-                strings_to_check.append(base.split(".")[-1])
+        models_to_check = [base for base in self.bases if base is not models.Model]
         # Check we have no FKs/M2Ms with it
         for fname, field in self.fields:
             if field.remote_field:
-                if isinstance(field.remote_field.model, six.string_types):
-                    strings_to_check.append(field.remote_field.model.split(".")[-1])
-        # Now go over all the strings and compare them
-        for string in strings_to_check:
-            if string.lower() == name.lower():
-                return True
+                models_to_check.append(field.remote_field.model)
+        # Now go over all the models and check against them
+        for model in models_to_check:
+            model_app_label, model_name = self.model_to_key(model)
+            if model_name.lower() == name_lower:
+                if app_label is None or not model_app_label or model_app_label == app_label:
+                    return True
         return False
 
     def model_to_key(self, model):
@@ -307,6 +309,28 @@ class RenameModel(ModelOperation):
                 new_fields.append((name, field))
             state.models[related_key].fields = new_fields
             state.reload_model(*related_key)
+        # Repoint M2Ms with through pointing to us
+        related_models = {
+            f.remote_field.model for f in model._meta.fields
+            if getattr(f.remote_field, 'model', None)
+        }
+        model_name = '%s.%s' % (app_label, self.old_name)
+        for related_model in related_models:
+            if related_model == model:
+                related_key = (app_label, self.new_name_lower)
+            else:
+                related_key = (related_model._meta.app_label, related_model._meta.model_name)
+            new_fields = []
+            changed = False
+            for name, field in state.models[related_key].fields:
+                if field.is_relation and field.many_to_many and field.remote_field.through == model_name:
+                    field = field.clone()
+                    field.remote_field.through = '%s.%s' % (app_label, self.new_name)
+                    changed = True
+                new_fields.append((name, field))
+            if changed:
+                state.models[related_key].fields = new_fields
+                state.reload_model(*related_key)
         state.reload_model(app_label, self.new_name_lower)
 
     def database_forwards(self, app_label, schema_editor, from_state, to_state):
@@ -641,6 +665,8 @@ class AlterModelOptions(ModelOptionOperation):
 
     # Model options we want to compare and preserve in an AlterModelOptions op
     ALTER_OPTION_KEYS = [
+        "base_manager_name",
+        "default_manager_name",
         "get_latest_by",
         "managed",
         "ordering",
@@ -716,3 +742,80 @@ class AlterModelManagers(ModelOptionOperation):
 
     def describe(self):
         return "Change managers on %s" % (self.name, )
+
+
+class AddIndex(Operation):
+    """
+    Add an index on a model.
+    """
+
+    def __init__(self, model_name, index):
+        self.model_name = model_name
+        self.index = index
+
+    def state_forwards(self, app_label, state):
+        model_state = state.models[app_label, self.model_name.lower()]
+        self.index.model = state.apps.get_model(app_label, self.model_name)
+        model_state.options['indexes'].append(self.index)
+
+    def database_forwards(self, app_label, schema_editor, from_state, to_state):
+        schema_editor.add_index(self.index)
+
+    def database_backwards(self, app_label, schema_editor, from_state, to_state):
+        schema_editor.remove_index(self.index)
+
+    def deconstruct(self):
+        kwargs = {
+            'model_name': self.model_name,
+            'index': self.index,
+        }
+        return (
+            self.__class__.__name__,
+            [],
+            kwargs,
+        )
+
+    def describe(self):
+        return 'Create index on field(s) %s of model %s' % (
+            ', '.join(self.index.fields),
+            self.model_name,
+        )
+
+
+class RemoveIndex(Operation):
+    """
+    Remove an index from a model.
+    """
+
+    def __init__(self, model_name, name):
+        self.model_name = model_name
+        self.name = name
+
+    def state_forwards(self, app_label, state):
+        model_state = state.models[app_label, self.model_name.lower()]
+        indexes = model_state.options['indexes']
+        model_state.options['indexes'] = [idx for idx in indexes if idx.name != self.name]
+
+    def database_forwards(self, app_label, schema_editor, from_state, to_state):
+        from_model_state = from_state.models[app_label, self.model_name.lower()]
+        index = from_model_state.get_index_by_name(self.name)
+        schema_editor.remove_index(index)
+
+    def database_backwards(self, app_label, schema_editor, from_state, to_state):
+        to_model_state = to_state.models[app_label, self.model_name.lower()]
+        index = to_model_state.get_index_by_name(self.name)
+        schema_editor.add_index(index)
+
+    def deconstruct(self):
+        kwargs = {
+            'model_name': self.model_name,
+            'name': self.name,
+        }
+        return (
+            self.__class__.__name__,
+            [],
+            kwargs,
+        )
+
+    def describe(self):
+        return 'Remove index %s from %s' % (self.name, self.model_name)

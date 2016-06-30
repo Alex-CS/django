@@ -31,7 +31,7 @@ class SimpleTests(PostgreSQLTestCase):
         instance = HStoreModel(field=None)
         instance.save()
         reloaded = HStoreModel.objects.get()
-        self.assertEqual(reloaded.field, None)
+        self.assertIsNone(reloaded.field)
 
     def test_value_null(self):
         value = {'a': None}
@@ -207,6 +207,13 @@ class TestFormField(PostgreSQLTestCase):
             field.clean('{"a": "b"')
         self.assertEqual(cm.exception.messages[0], 'Could not load JSON data.')
         self.assertEqual(cm.exception.code, 'invalid_json')
+
+    def test_non_dict_json(self):
+        field = forms.HStoreField()
+        msg = 'Input must be a JSON dictionary.'
+        with self.assertRaisesMessage(exceptions.ValidationError, msg) as cm:
+            field.clean('["a", "b", 1]')
+        self.assertEqual(cm.exception.code, 'invalid_format')
 
     def test_not_string_values(self):
         field = forms.HStoreField()
